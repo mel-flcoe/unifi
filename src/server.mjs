@@ -1,17 +1,38 @@
 import { createServer } from "node:http";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, unlink } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evaluate } from "./evaluate.mjs";
 import { fetchSnapshot } from "./unifi.mjs";
 import { demoInput } from "./demo.mjs";
+import {
+  clearSessionCookie,
+  createUser,
+  deleteUser,
+  findUserByToken,
+  initAuth,
+  listUsers,
+  login,
+  logout,
+  readCookie,
+  sessionCookie,
+  updateUser,
+  visibleSites,
+} from "./auth.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicDir = path.join(root, "public");
 const dataDir = path.join(root, "data");
 const historyPath = path.join(dataDir, "history.json");
 const settingsPath = path.join(dataDir, "settings.json");
+const logoPath = path.join(dataDir, "logo");
+const logoTypes = new Map([
+  ["image/png", [0x89, 0x50, 0x4e, 0x47]],
+  ["image/jpeg", [0xff, 0xd8, 0xff]],
+  ["image/gif", [0x47, 0x49, 0x46, 0x38]],
+  ["image/webp", [0x52, 0x49, 0x46, 0x46]],
+]);
 
 loadEnv(path.join(root, ".env"));
 
@@ -22,7 +43,10 @@ const packetLossLimit = Number(process.env.PACKET_LOSS_PERCENT || 2);
 const apiKey = process.env.UNIFI_API_KEY || "";
 const clients = new Set();
 
-let pollSeconds = await loadPollSeconds();
+await initAuth(dataDir);
+let pollSeconds = 60;
+let logoType = null;
+await loadSettings();
 let pollTimer = null;
 let checking = false;
 
@@ -42,18 +66,30 @@ function normalizePollSeconds(value) {
   return seconds;
 }
 
-async function loadPollSeconds() {
+async function loadSettings() {
+  pollSeconds = normalizePollSeconds(process.env.POLL_SECONDS) ?? 60;
+  logoType = null;
   try {
     const saved = JSON.parse(await readFile(settingsPath, "utf8"));
-    return normalizePollSeconds(saved.pollSeconds) ?? normalizePollSeconds(process.env.POLL_SECONDS) ?? 60;
+    pollSeconds = normalizePollSeconds(saved.pollSeconds) ?? pollSeconds;
+    if (logoTypes.has(saved.logoType) && existsSync(logoPath)) logoType = saved.logoType;
   } catch {
-    return normalizePollSeconds(process.env.POLL_SECONDS) ?? 60;
+    // The first run uses the environment default until Settings is saved.
   }
 }
 
-async function savePollSeconds(seconds) {
+async function saveSettings() {
   await mkdir(dataDir, { recursive: true });
-  await writeFile(settingsPath, JSON.stringify({ pollSeconds: seconds }));
+  await writeFile(settingsPath, JSON.stringify({ pollSeconds, logoType }));
+}
+
+function logoMatches(type, body) {
+  const signature = logoTypes.get(type);
+  if (!signature || body.length < 12) return false;
+  const bytes = signature.every((byte, index) => body[index] === byte);
+  if (!bytes) return false;
+  if (type === "image/webp") return body.subarray(8, 12).toString("ascii") === "WEBP";
+  return true;
 }
 
 function loadEnv(file) {
@@ -88,13 +124,34 @@ async function saveHistory(next) {
   await writeFile(historyPath, JSON.stringify(next));
 }
 
-function livePayload() {
-  return { ...snapshot, pollSeconds, checking };
+function payloadFor(user) {
+  const sites = visibleSites(snapshot.sites || [], user);
+  const singleSite = Boolean(user && !user.fullAccess && (user.siteIds || []).length === 1);
+  return {
+    updatedAt: snapshot.updatedAt,
+    error: snapshot.error,
+    demo: snapshot.demo,
+    ispNote: snapshot.ispNote || null,
+    sites,
+    pollSeconds,
+    checking,
+    access: user
+      ? { email: user.email, fullAccess: Boolean(user.fullAccess), admin: Boolean(user.admin), singleSite }
+      : null,
+  };
 }
 
 function broadcast() {
-  const chunk = `data: ${JSON.stringify(livePayload())}\n\n`;
-  for (const client of clients) client.write(chunk);
+  for (const client of clients) {
+    const user = findUserByToken(client.token);
+    if (!user) {
+      client.response.write(`data: ${JSON.stringify({ unauthorized: true })}\n\n`);
+      client.response.end();
+      clients.delete(client);
+      continue;
+    }
+    client.response.write(`data: ${JSON.stringify(payloadFor(user))}\n\n`);
+  }
 }
 
 function scheduleNextPoll() {
@@ -165,45 +222,208 @@ const types = {
   ".svg": "image/svg+xml",
 };
 
-function send(response, status, body, type = "application/json; charset=utf-8") {
+function send(response, status, body, type = "application/json; charset=utf-8", headers = {}) {
   response.writeHead(status, {
     "Content-Type": type,
     "Cache-Control": "no-store",
+    ...headers,
   });
   response.end(body);
 }
 
+function redirect(response, location) {
+  response.writeHead(302, { Location: location, "Cache-Control": "no-store" });
+  response.end();
+}
+
+function requestUser(request) {
+  return findUserByToken(readCookie(request.headers.cookie, "unifi_session"));
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+  const user = requestUser(request);
+  const publicFile = url.pathname === "/styles.css" || url.pathname === "/login.js" || url.pathname === "/brand.js";
+
+  if (url.pathname === "/logo" && request.method === "GET") {
+    if (!logoType) {
+      send(response, 404, "Not found", "text/plain; charset=utf-8");
+      return;
+    }
+    try {
+      send(response, 200, await readFile(logoPath), logoType);
+    } catch {
+      send(response, 404, "Not found", "text/plain; charset=utf-8");
+    }
+    return;
+  }
+
+  if (url.pathname === "/login" && request.method === "GET") {
+    if (user) {
+      redirect(response, "/");
+      return;
+    }
+    await serveFile(response, "/login.html");
+    return;
+  }
+
+  if (url.pathname === "/login" && request.method === "POST") {
+    const parsed = await readJson(request);
+    if (!parsed.ok) {
+      send(response, 400, JSON.stringify({ error: "Enter your email and password." }));
+      return;
+    }
+    const result = await login(parsed.value.email, parsed.value.password);
+    if (!result.token) {
+      send(response, 401, JSON.stringify({ error: result.error }));
+      return;
+    }
+    send(response, 200, JSON.stringify({ email: result.user.email }), "application/json; charset=utf-8", {
+      "Set-Cookie": sessionCookie(result.token),
+    });
+    return;
+  }
+
+  if (url.pathname === "/logout" && request.method === "POST") {
+    await logout(readCookie(request.headers.cookie, "unifi_session"));
+    send(response, 200, JSON.stringify({ ok: true }), "application/json; charset=utf-8", {
+      "Set-Cookie": clearSessionCookie(),
+    });
+    return;
+  }
+
+  if (!user && !publicFile) {
+    if (url.pathname.startsWith("/api/")) {
+      send(response, 401, JSON.stringify({ error: "Sign in required." }));
+      return;
+    }
+    redirect(response, "/login");
+    return;
+  }
+
   if (url.pathname === "/api/warnings") {
-    send(response, 200, JSON.stringify(livePayload()));
+    send(response, 200, JSON.stringify(payloadFor(user)));
     return;
   }
 
   if (url.pathname === "/api/settings" && request.method === "GET") {
-    send(response, 200, JSON.stringify({ pollSeconds }));
+    if (!user.admin) {
+      send(response, 403, JSON.stringify({ error: "Admin access is required." }));
+      return;
+    }
+    send(response, 200, JSON.stringify({ pollSeconds, hasLogo: Boolean(logoType) }));
+    return;
+  }
+
+  if (url.pathname === "/api/logo" && request.method === "POST") {
+    if (!user.admin) {
+      send(response, 403, JSON.stringify({ error: "Admin access is required." }));
+      return;
+    }
+    const type = String(request.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+    let body;
+    try {
+      body = await readBuffer(request);
+    } catch {
+      send(response, 400, JSON.stringify({ error: "Use an image up to 1 MB." }));
+      return;
+    }
+    if (!logoMatches(type, body)) {
+      send(response, 400, JSON.stringify({ error: "Use a PNG, JPEG, WebP, or GIF." }));
+      return;
+    }
+    if (body.length > 1024 * 1024) {
+      send(response, 400, JSON.stringify({ error: "Use an image up to 1 MB." }));
+      return;
+    }
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(logoPath, body);
+    logoType = type;
+    await saveSettings();
+    send(response, 200, JSON.stringify({ hasLogo: true }));
+    return;
+  }
+
+  if (url.pathname === "/api/logo" && request.method === "DELETE") {
+    if (!user.admin) {
+      send(response, 403, JSON.stringify({ error: "Admin access is required." }));
+      return;
+    }
+    logoType = null;
+    await saveSettings();
+    await unlink(logoPath).catch(() => {});
+    send(response, 200, JSON.stringify({ hasLogo: false }));
     return;
   }
 
   if (url.pathname === "/api/settings" && request.method === "POST") {
-    const body = await readBody(request);
-    let parsed = null;
-    try {
-      parsed = JSON.parse(body || "{}");
-    } catch {
+    if (!user.admin) {
+      send(response, 403, JSON.stringify({ error: "Admin access is required." }));
+      return;
+    }
+    const parsed = await readJson(request);
+    if (!parsed.ok) {
       send(response, 400, JSON.stringify({ error: "Enter a whole number of seconds." }));
       return;
     }
-    const seconds = normalizePollSeconds(parsed.pollSeconds);
+    const seconds = normalizePollSeconds(parsed.value.pollSeconds);
     if (seconds == null) {
       send(response, 400, JSON.stringify({ error: "Use a whole number from 5 to 86400 seconds." }));
       return;
     }
     pollSeconds = seconds;
-    await savePollSeconds(seconds);
+    await saveSettings();
     scheduleNextPoll();
     broadcast();
     send(response, 200, JSON.stringify({ pollSeconds }));
+    return;
+  }
+
+  if (url.pathname === "/api/users" && request.method === "GET") {
+    if (!user.admin) {
+      send(response, 403, JSON.stringify({ error: "Admin access is required." }));
+      return;
+    }
+    send(response, 200, JSON.stringify({ users: listUsers(), sites: snapshot.sites || [] }));
+    return;
+  }
+
+  if (url.pathname === "/api/users" && request.method === "POST") {
+    if (!user.admin) {
+      send(response, 403, JSON.stringify({ error: "Admin access is required." }));
+      return;
+    }
+    const parsed = await readJson(request);
+    if (!parsed.ok) {
+      send(response, 400, JSON.stringify({ error: "Could not read that user." }));
+      return;
+    }
+    const result = await createUser(parsed.value);
+    send(response, result.error ? 400 : 200, JSON.stringify(result.error ? { error: result.error } : result));
+    return;
+  }
+
+  const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/);
+  if (userMatch && (request.method === "PUT" || request.method === "DELETE")) {
+    if (!user.admin) {
+      send(response, 403, JSON.stringify({ error: "Admin access is required." }));
+      return;
+    }
+    const id = decodeURIComponent(userMatch[1]);
+    if (request.method === "DELETE") {
+      const result = await deleteUser(id);
+      broadcast();
+      send(response, result.error ? 400 : 200, JSON.stringify(result.error ? { error: result.error } : result));
+      return;
+    }
+    const parsed = await readJson(request);
+    if (!parsed.ok) {
+      send(response, 400, JSON.stringify({ error: "Could not read that user." }));
+      return;
+    }
+    const result = await updateUser(id, parsed.value);
+    broadcast();
+    send(response, result.error ? 400 : 200, JSON.stringify(result.error ? { error: result.error } : result));
     return;
   }
 
@@ -213,13 +433,29 @@ const server = createServer(async (request, response) => {
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     });
-    response.write(`data: ${JSON.stringify(livePayload())}\n\n`);
-    clients.add(response);
-    request.on("close", () => clients.delete(response));
+    const client = { response, token: readCookie(request.headers.cookie, "unifi_session") };
+    response.write(`data: ${JSON.stringify(payloadFor(user))}\n\n`);
+    clients.add(client);
+    request.on("close", () => clients.delete(client));
     return;
   }
 
-  const requested = url.pathname === "/settings" ? "/settings.html" : url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
+  if ((url.pathname === "/settings" || url.pathname === "/users") && !user.admin) {
+    redirect(response, "/");
+    return;
+  }
+
+  const requested = url.pathname === "/settings"
+    ? "/settings.html"
+    : url.pathname === "/users"
+      ? "/users.html"
+      : url.pathname === "/"
+        ? "/index.html"
+        : decodeURIComponent(url.pathname);
+  await serveFile(response, requested);
+});
+
+async function serveFile(response, requested) {
   const filePath = path.normalize(path.join(publicDir, requested));
   if (!filePath.startsWith(publicDir)) {
     send(response, 403, "Forbidden", "text/plain; charset=utf-8");
@@ -231,19 +467,40 @@ const server = createServer(async (request, response) => {
   } catch {
     send(response, 404, "Not found", "text/plain; charset=utf-8");
   }
-});
+}
 
-function readBody(request) {
+function readBuffer(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    request.on("data", (chunk) => chunks.push(chunk));
-    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    let size = 0;
+    request.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > 1024 * 1024 + 1) {
+        request.destroy();
+        reject(new Error("too large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", () => resolve(Buffer.concat(chunks)));
     request.on("error", reject);
   });
+}
+
+function readBody(request) {
+  return readBuffer(request).then((body) => body.toString("utf8"));
+}
+
+async function readJson(request) {
+  try {
+    return { ok: true, value: JSON.parse((await readBody(request)) || "{}") };
+  } catch {
+    return { ok: false, value: null };
+  }
 }
 
 await tick();
 scheduleNextPoll();
 server.listen(port, "127.0.0.1", () => {
-  console.log(`UniFi warnings dashboard at http://127.0.0.1:${port}`);
+  console.log(`Unifi Site Monitor at http://127.0.0.1:${port}`);
 });

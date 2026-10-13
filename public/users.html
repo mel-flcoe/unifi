@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Users · Unifi Site Monitor</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <img id="site-logo" class="site-logo" alt="" hidden />
+        <div>
+          <p class="eyebrow">Unifi Site Monitor</p>
+          <h1>Users</h1>
+        </div>
+      </div>
+      <div class="header-side">
+        <nav class="header-links">
+          <a class="settings-link" href="/">Sites</a>
+          <a class="settings-link" href="/settings">Settings</a>
+          <button type="button" data-logout>Log out</button>
+        </nav>
+      </div>
+    </header>
+    <main>
+      <table class="user-table">
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>Access</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="user-rows"></tbody>
+      </table>
+      <form class="settings-form" id="user-form">
+        <h2 id="form-title">Add user</h2>
+        <input type="hidden" name="id" />
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" required />
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" />
+        <p class="quiet" id="password-hint">At least 8 characters.</p>
+        <label class="check"><input name="admin" type="checkbox" /> Admin access</label>
+        <p class="quiet">Admins can open user management and settings.</p>
+        <label class="check"><input name="fullAccess" type="checkbox" /> Full access to every site</label>
+        <fieldset id="site-field">
+          <legend>Sites this user can view</legend>
+          <div class="site-picks" id="site-picks"></div>
+        </fieldset>
+        <div class="header-links">
+          <button type="submit" id="save-user">Add user</button>
+          <button type="button" id="cancel-edit" hidden>Cancel</button>
+        </div>
+        <p id="user-message" class="quiet" role="status"></p>
+      </form>
+    </main>
+    <script src="/brand.js"></script>
+    <script type="module" src="/users.js"></script>
+  </body>
+</html>

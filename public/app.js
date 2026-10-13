@@ -29,9 +29,32 @@ function openSite(siteId) {
   if (!dialog.open) dialog.showModal();
 }
 
+let navMarkup = "";
+
+function renderNav() {
+  const nav = document.querySelector("#nav");
+  if (!nav || !latest?.access) return;
+  const links = [];
+  if (latest.access.admin) {
+    links.push(`<a class="settings-link" href="/users">Users</a>`);
+    links.push(`<a class="settings-link" href="/settings">Settings</a>`);
+  }
+  links.push(`<span class="who">${escapeHtml(latest.access.email)}</span>`);
+  const markup = links.join("");
+  if (markup === navMarkup) return;
+  navMarkup = markup;
+  nav.innerHTML = markup;
+}
+
 function renderSites() {
   if (!latest) return;
   const { error, sites = [] } = latest;
+  renderNav();
+  if (latest.access?.singleSite) {
+    renderSingleSite(sites[0]);
+    return;
+  }
+  document.querySelector("h1").textContent = "Sites";
 
   if (!latest.updatedAt && error) {
     main.innerHTML = setupPanel(error);
@@ -59,6 +82,23 @@ function renderSites() {
   }
 }
 
+let singleSignature = "";
+
+function renderSingleSite(site) {
+  const heading = document.querySelector("h1");
+  if (!site) {
+    heading.textContent = "Site";
+    main.innerHTML = `<section class="panel"><h2>Site unavailable</h2><p>The assigned site was not in the latest UniFi check.</p></section>`;
+    singleSignature = "missing";
+    return;
+  }
+  heading.textContent = site.name;
+  const signature = `${site.id}:${site.offline}:${site.tone}:${(site.warnings || []).map((warning) => `${warning.id}:${warning.reason}`).join("|")}`;
+  if (signature === singleSignature) return;
+  singleSignature = signature;
+  main.innerHTML = `<section class="single-site">${siteDetail(site)}</section>`;
+}
+
 function renderTile(site) {
   const label = site.offline === 1 ? "device offline" : "devices offline";
   return `<button type="button" class="site-tile ${site.tone}" data-site-id="${escapeHtml(site.id)}">
@@ -68,7 +108,7 @@ function renderTile(site) {
   </button>`;
 }
 
-function fillDialog(site) {
+function siteDetail(site) {
   const facts = [
     ["Console", site.console],
     ["Devices", site.total],
@@ -82,13 +122,17 @@ function fillDialog(site) {
   const body = problems.length
     ? problems.map(renderWarning).join("")
     : `<p class="quiet">No devices are offline at this site.</p>`;
-  siteBody.innerHTML = `<header class="dialog-head ${site.tone}">
+  return `<header class="dialog-head ${site.tone}">
       <p class="eyebrow">Site</p>
       <h2>${escapeHtml(site.name)}</h2>
       <p class="dialog-count">${site.offline} offline</p>
     </header>
     <dl class="metrics dialog-facts">${factList}</dl>
     <div class="dialog-list">${body}</div>`;
+}
+
+function fillDialog(site) {
+  siteBody.innerHTML = siteDetail(site);
 }
 
 function renderWarning(warning) {
@@ -155,6 +199,10 @@ function render() {
 const events = new EventSource("/api/events");
 events.onmessage = (event) => {
   latest = JSON.parse(event.data);
+  if (latest.unauthorized) {
+    location.href = "/login";
+    return;
+  }
   render();
 };
 setInterval(paintStatus, 1000);

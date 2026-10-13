@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in · Unifi Site Monitor</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <img id="site-logo" class="site-logo" alt="" hidden />
+        <div>
+          <p class="eyebrow">Unifi Site Monitor</p>
+          <h1>Sign in</h1>
+        </div>
+      </div>
+    </header>
+    <main>
+      <form class="settings-form" id="login">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required />
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <button type="submit">Sign in</button>
+        <p id="login-error" class="quiet" role="status"></p>
+      </form>
+    </main>
+    <script src="/brand.js"></script>
+    <script type="module" src="/login.js"></script>
+  </body>
+</html>

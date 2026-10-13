@@ -3,17 +3,24 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>UniFi settings</title>
+    <title>Settings · Unifi Site Monitor</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="top">
-      <div>
-        <p class="eyebrow">UniFi Site Manager</p>
-        <h1>Settings</h1>
+      <div class="brand">
+        <img id="site-logo" class="site-logo" alt="" hidden />
+        <div>
+          <p class="eyebrow">Unifi Site Monitor</p>
+          <h1>Settings</h1>
+        </div>
       </div>
       <div class="header-side">
-        <a class="settings-link" href="/">Sites</a>
+        <nav class="header-links">
+          <a class="settings-link" href="/">Sites</a>
+          <a class="settings-link" href="/users">Users</a>
+          <button type="button" data-logout>Log out</button>
+        </nav>
       </div>
     </header>
     <main>
@@ -24,7 +31,19 @@
         <button type="submit">Save</button>
         <p id="settings-message" class="quiet" role="status"></p>
       </form>
+      <form class="settings-form" id="logo-form">
+        <label for="logo">Site logo</label>
+        <p class="quiet">Shown in the header of every page, including sign in. PNG, JPEG, WebP, or GIF, up to 1 MB.</p>
+        <img id="logo-preview" class="logo-preview" alt="Current site logo" hidden />
+        <input id="logo" name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+        <div class="header-links">
+          <button type="submit">Save logo</button>
+          <button type="button" id="remove-logo" hidden>Remove logo</button>
+        </div>
+        <p id="logo-message" class="quiet" role="status"></p>
+      </form>
     </main>
+    <script src="/brand.js"></script>
     <script type="module" src="/settings.js"></script>
   </body>
 </html>
