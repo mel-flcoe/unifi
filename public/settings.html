@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UniFi settings</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <p class="eyebrow">UniFi Site Manager</p>
+        <h1>Settings</h1>
+      </div>
+      <div class="header-side">
+        <a class="settings-link" href="/">Sites</a>
+      </div>
+    </header>
+    <main>
+      <form class="settings-form" id="settings">
+        <label for="poll-seconds">Poll interval in seconds</label>
+        <p class="quiet">How often the dashboard asks UniFi for every site. The open Sites page updates in the background.</p>
+        <input id="poll-seconds" name="pollSeconds" type="number" min="5" max="86400" step="1" required />
+        <button type="submit">Save</button>
+        <p id="settings-message" class="quiet" role="status"></p>
+      </form>
+    </main>
+    <script type="module" src="/settings.js"></script>
+  </body>
+</html>
