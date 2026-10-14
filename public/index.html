@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Unifi Site Monitor</title>
+    <link rel="icon" href="/favicon" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -16,8 +17,11 @@
         </div>
       </div>
       <div class="header-side">
-        <nav id="nav" class="header-links"></nav>
-        <button type="button" data-logout>Log out</button>
+        <nav class="menu" aria-label="Account">
+          <span id="nav"></span>
+          <a href="/password">Password</a>
+          <button type="button" data-logout>Log out</button>
+        </nav>
         <div class="status" id="status">Waiting for the first check</div>
       </div>
     </header>

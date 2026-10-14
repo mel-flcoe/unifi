@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { initAuth, listUsers, login, verifyPassword, visibleSites, createUser, updateUser, deleteUser } from "./auth.mjs";
+import { initAuth, listUsers, login, verifyPassword, visibleSites, createUser, updateUser, deleteUser, changePassword } from "./auth.mjs";
 
 const primaryHash =
   "320aae528f2487c05ea5a3628e763cd2:fd89bb7ea9f2663275cf611fd9ab93427821e6c86415aedbf5380df4e61401b6bdf82f683366584056a169fd1a810bfeafff2b9ee8cedfc8c2da0cf2f24cbcf9";
@@ -32,7 +32,7 @@ test("seeds the primary user and can add, disable, and delete another user", asy
 
   const created = await createUser({
     email: "tech@example.com",
-    password: "yard-gate",
+    password: "yard-gate-key",
     fullAccess: false,
     admin: false,
     siteIds: ["site-west"],
@@ -40,12 +40,21 @@ test("seeds the primary user and can add, disable, and delete another user", asy
   assert.equal(created.user.siteIds[0], "site-west");
   assert.equal(created.user.admin, false);
 
-  const signedIn = await login("tech@example.com", "yard-gate");
+  const signedIn = await login("tech@example.com", "yard-gate-key");
   assert.equal(signedIn.user.email, "tech@example.com");
+
+  const tooShort = await changePassword(created.user.id, "yard-gate-key", "short-pass");
+  assert.match(tooShort.error, /12 characters/);
+  const wrong = await changePassword(created.user.id, "not-the-password", "a-longer-secret");
+  assert.match(wrong.error, /incorrect/);
+  const changed = await changePassword(created.user.id, "yard-gate-key", "a-longer-secret");
+  assert.equal(changed.ok, true);
+  const withNew = await login("tech@example.com", "a-longer-secret");
+  assert.equal(withNew.user.email, "tech@example.com");
 
   const disabled = await updateUser(created.user.id, { disabled: true });
   assert.equal(disabled.user.disabled, true);
-  const blocked = await login("tech@example.com", "yard-gate");
+  const blocked = await login("tech@example.com", "a-longer-secret");
   assert.match(blocked.error, /disabled/);
 
   const removed = await deleteUser(created.user.id);

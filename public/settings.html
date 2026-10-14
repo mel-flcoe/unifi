@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Settings · Unifi Site Monitor</title>
+    <link rel="icon" href="/favicon" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -16,9 +17,10 @@
         </div>
       </div>
       <div class="header-side">
-        <nav class="header-links">
-          <a class="settings-link" href="/">Sites</a>
-          <a class="settings-link" href="/users">Users</a>
+        <nav class="menu" aria-label="Account">
+          <a href="/">Sites</a>
+          <a href="/users">Users</a>
+          <a href="/password">Password</a>
           <button type="button" data-logout>Log out</button>
         </nav>
       </div>
@@ -41,6 +43,17 @@
           <button type="button" id="remove-logo" hidden>Remove logo</button>
         </div>
         <p id="logo-message" class="quiet" role="status"></p>
+      </form>
+      <form class="settings-form" id="favicon-form">
+        <label for="favicon">Favicon</label>
+        <p class="quiet">Shown in the browser tab on every page. PNG, JPEG, WebP, GIF, or ICO, up to 1 MB.</p>
+        <img id="favicon-preview" class="favicon-preview" alt="Current favicon" hidden />
+        <input id="favicon" name="favicon" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/x-icon,.ico" />
+        <div class="header-links">
+          <button type="submit">Save favicon</button>
+          <button type="button" id="remove-favicon" hidden>Remove favicon</button>
+        </div>
+        <p id="favicon-message" class="quiet" role="status"></p>
       </form>
     </main>
     <script src="/brand.js"></script>

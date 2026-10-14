@@ -8,6 +8,7 @@ import { fetchSnapshot } from "./unifi.mjs";
 import { demoInput } from "./demo.mjs";
 import {
   clearSessionCookie,
+  changePassword,
   createUser,
   deleteUser,
   findUserByToken,
@@ -25,14 +26,19 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicDir = path.join(root, "public");
 const dataDir = path.join(root, "data");
 const historyPath = path.join(dataDir, "history.json");
+const snapshotPath = path.join(dataDir, "snapshot.json");
 const settingsPath = path.join(dataDir, "settings.json");
 const logoPath = path.join(dataDir, "logo");
-const logoTypes = new Map([
+const faviconPath = path.join(dataDir, "favicon");
+const imageTypes = new Map([
   ["image/png", [0x89, 0x50, 0x4e, 0x47]],
   ["image/jpeg", [0xff, 0xd8, 0xff]],
   ["image/gif", [0x47, 0x49, 0x46, 0x38]],
   ["image/webp", [0x52, 0x49, 0x46, 0x46]],
+  ["image/x-icon", [0x00, 0x00, 0x01, 0x00]],
 ]);
+const logoTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const faviconTypes = new Set([...logoTypes, "image/x-icon"]);
 
 loadEnv(path.join(root, ".env"));
 
@@ -46,6 +52,7 @@ const clients = new Set();
 await initAuth(dataDir);
 let pollSeconds = 60;
 let logoType = null;
+let faviconType = null;
 await loadSettings();
 let pollTimer = null;
 let checking = false;
@@ -69,10 +76,12 @@ function normalizePollSeconds(value) {
 async function loadSettings() {
   pollSeconds = normalizePollSeconds(process.env.POLL_SECONDS) ?? 60;
   logoType = null;
+  faviconType = null;
   try {
     const saved = JSON.parse(await readFile(settingsPath, "utf8"));
     pollSeconds = normalizePollSeconds(saved.pollSeconds) ?? pollSeconds;
     if (logoTypes.has(saved.logoType) && existsSync(logoPath)) logoType = saved.logoType;
+    if (faviconTypes.has(saved.faviconType) && existsSync(faviconPath)) faviconType = saved.faviconType;
   } catch {
     // The first run uses the environment default until Settings is saved.
   }
@@ -80,16 +89,38 @@ async function loadSettings() {
 
 async function saveSettings() {
   await mkdir(dataDir, { recursive: true });
-  await writeFile(settingsPath, JSON.stringify({ pollSeconds, logoType }));
+  await writeFile(settingsPath, JSON.stringify({ pollSeconds, logoType, faviconType }));
 }
 
-function logoMatches(type, body) {
-  const signature = logoTypes.get(type);
-  if (!signature || body.length < 12) return false;
+function normalizedImageType(type) {
+  const value = String(type || "").split(";")[0].trim().toLowerCase();
+  if (value === "image/vnd.microsoft.icon") return "image/x-icon";
+  return value;
+}
+
+function imageMatches(type, body) {
+  const signature = imageTypes.get(type);
+  const minimum = type === "image/x-icon" ? 6 : 12;
+  if (!signature || body.length < minimum) return false;
   const bytes = signature.every((byte, index) => body[index] === byte);
   if (!bytes) return false;
   if (type === "image/webp") return body.subarray(8, 12).toString("ascii") === "WEBP";
   return true;
+}
+
+function sniffImage(body, allowed) {
+  for (const type of allowed) {
+    if (imageMatches(type, body)) return type;
+  }
+  return "";
+}
+
+function storedImageType(declared, body, allowed) {
+  const type = normalizedImageType(declared);
+  const sniffed = sniffImage(body, allowed);
+  if (!type || type === "application/octet-stream") return sniffed;
+  if (!allowed.has(type) || sniffed !== type) return "";
+  return type;
 }
 
 function loadEnv(file) {
@@ -122,6 +153,30 @@ async function loadHistory() {
 async function saveHistory(next) {
   await mkdir(dataDir, { recursive: true });
   await writeFile(historyPath, JSON.stringify(next));
+}
+
+async function loadSavedSnapshot() {
+  try {
+    const saved = JSON.parse(await readFile(snapshotPath, "utf8"));
+    if (!saved || typeof saved !== "object" || !saved.updatedAt) return;
+    snapshot = {
+      updatedAt: saved.updatedAt,
+      error: saved.error || null,
+      demo: Boolean(saved.demo),
+      ispNote: saved.ispNote || null,
+      summary: saved.summary || snapshot.summary,
+      sites: Array.isArray(saved.sites) ? saved.sites : [],
+      warnings: Array.isArray(saved.warnings) ? saved.warnings : [],
+    };
+  } catch {
+    // The first run has nothing to show until UniFi answers.
+  }
+}
+
+async function saveSnapshot() {
+  if (!snapshot.updatedAt) return;
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(snapshotPath, JSON.stringify(snapshot));
 }
 
 function payloadFor(user) {
@@ -211,6 +266,7 @@ async function tick() {
   } finally {
     polling = false;
     checking = false;
+    await saveSnapshot();
     broadcast();
   }
 }
@@ -221,6 +277,43 @@ const types = {
   ".js": "text/javascript; charset=utf-8",
   ".svg": "image/svg+xml",
 };
+
+async function sendImage(response, filePath, type) {
+  if (!type) {
+    send(response, 404, "Not found", "text/plain; charset=utf-8");
+    return;
+  }
+  try {
+    send(response, 200, await readFile(filePath), type);
+  } catch {
+    send(response, 404, "Not found", "text/plain; charset=utf-8");
+  }
+}
+
+async function readUploadedImage(request, response, allowed, invalidMessage) {
+  if (!requestUser(request)?.admin) {
+    send(response, 403, JSON.stringify({ error: "Admin access is required." }));
+    return null;
+  }
+  let body;
+  try {
+    body = await readBuffer(request);
+  } catch {
+    send(response, 400, JSON.stringify({ error: "Use an image up to 1 MB." }));
+    return null;
+  }
+  if (body.length > 1024 * 1024) {
+    send(response, 400, JSON.stringify({ error: "Use an image up to 1 MB." }));
+    return null;
+  }
+  const type = storedImageType(request.headers["content-type"], body, allowed);
+  if (!type) {
+    send(response, 400, JSON.stringify({ error: invalidMessage }));
+    return null;
+  }
+  await mkdir(dataDir, { recursive: true });
+  return { type, body };
+}
 
 function send(response, status, body, type = "application/json; charset=utf-8", headers = {}) {
   response.writeHead(status, {
@@ -246,15 +339,12 @@ const server = createServer(async (request, response) => {
   const publicFile = url.pathname === "/styles.css" || url.pathname === "/login.js" || url.pathname === "/brand.js";
 
   if (url.pathname === "/logo" && request.method === "GET") {
-    if (!logoType) {
-      send(response, 404, "Not found", "text/plain; charset=utf-8");
-      return;
-    }
-    try {
-      send(response, 200, await readFile(logoPath), logoType);
-    } catch {
-      send(response, 404, "Not found", "text/plain; charset=utf-8");
-    }
+    await sendImage(response, logoPath, logoType);
+    return;
+  }
+
+  if (url.pathname === "/favicon" && request.method === "GET") {
+    await sendImage(response, faviconPath, faviconType);
     return;
   }
 
@@ -301,6 +391,21 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (url.pathname === "/api/password" && request.method === "POST") {
+    const parsed = await readJson(request);
+    if (!parsed.ok) {
+      send(response, 400, JSON.stringify({ error: "Enter your current password and a new password." }));
+      return;
+    }
+    if (parsed.value.newPassword !== parsed.value.confirmPassword) {
+      send(response, 400, JSON.stringify({ error: "Those new passwords do not match." }));
+      return;
+    }
+    const result = await changePassword(user.id, parsed.value.currentPassword, parsed.value.newPassword);
+    send(response, result.error ? 400 : 200, JSON.stringify(result.error ? { error: result.error } : { ok: true }));
+    return;
+  }
+
   if (url.pathname === "/api/warnings") {
     send(response, 200, JSON.stringify(payloadFor(user)));
     return;
@@ -311,34 +416,15 @@ const server = createServer(async (request, response) => {
       send(response, 403, JSON.stringify({ error: "Admin access is required." }));
       return;
     }
-    send(response, 200, JSON.stringify({ pollSeconds, hasLogo: Boolean(logoType) }));
+    send(response, 200, JSON.stringify({ pollSeconds, hasLogo: Boolean(logoType), hasFavicon: Boolean(faviconType) }));
     return;
   }
 
   if (url.pathname === "/api/logo" && request.method === "POST") {
-    if (!user.admin) {
-      send(response, 403, JSON.stringify({ error: "Admin access is required." }));
-      return;
-    }
-    const type = String(request.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
-    let body;
-    try {
-      body = await readBuffer(request);
-    } catch {
-      send(response, 400, JSON.stringify({ error: "Use an image up to 1 MB." }));
-      return;
-    }
-    if (!logoMatches(type, body)) {
-      send(response, 400, JSON.stringify({ error: "Use a PNG, JPEG, WebP, or GIF." }));
-      return;
-    }
-    if (body.length > 1024 * 1024) {
-      send(response, 400, JSON.stringify({ error: "Use an image up to 1 MB." }));
-      return;
-    }
-    await mkdir(dataDir, { recursive: true });
-    await writeFile(logoPath, body);
-    logoType = type;
+    const image = await readUploadedImage(request, response, logoTypes, "Use a PNG, JPEG, WebP, or GIF.");
+    if (!image) return;
+    await writeFile(logoPath, image.body);
+    logoType = image.type;
     await saveSettings();
     send(response, 200, JSON.stringify({ hasLogo: true }));
     return;
@@ -353,6 +439,28 @@ const server = createServer(async (request, response) => {
     await saveSettings();
     await unlink(logoPath).catch(() => {});
     send(response, 200, JSON.stringify({ hasLogo: false }));
+    return;
+  }
+
+  if (url.pathname === "/api/favicon" && request.method === "POST") {
+    const image = await readUploadedImage(request, response, faviconTypes, "Use a PNG, JPEG, WebP, GIF, or ICO.");
+    if (!image) return;
+    await writeFile(faviconPath, image.body);
+    faviconType = image.type;
+    await saveSettings();
+    send(response, 200, JSON.stringify({ hasFavicon: true }));
+    return;
+  }
+
+  if (url.pathname === "/api/favicon" && request.method === "DELETE") {
+    if (!user.admin) {
+      send(response, 403, JSON.stringify({ error: "Admin access is required." }));
+      return;
+    }
+    faviconType = null;
+    await saveSettings();
+    await unlink(faviconPath).catch(() => {});
+    send(response, 200, JSON.stringify({ hasFavicon: false }));
     return;
   }
 
@@ -433,6 +541,7 @@ const server = createServer(async (request, response) => {
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     });
+    response.flushHeaders();
     const client = { response, token: readCookie(request.headers.cookie, "unifi_session") };
     response.write(`data: ${JSON.stringify(payloadFor(user))}\n\n`);
     clients.add(client);
@@ -449,9 +558,11 @@ const server = createServer(async (request, response) => {
     ? "/settings.html"
     : url.pathname === "/users"
       ? "/users.html"
-      : url.pathname === "/"
-        ? "/index.html"
-        : decodeURIComponent(url.pathname);
+      : url.pathname === "/password"
+        ? "/password.html"
+        : url.pathname === "/"
+          ? "/index.html"
+          : decodeURIComponent(url.pathname);
   await serveFile(response, requested);
 });
 
@@ -499,8 +610,8 @@ async function readJson(request) {
   }
 }
 
-await tick();
-scheduleNextPoll();
+await loadSavedSnapshot();
 server.listen(port, "127.0.0.1", () => {
   console.log(`Unifi Site Monitor at http://127.0.0.1:${port}`);
 });
+tick().finally(() => scheduleNextPoll());

@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 const scryptAsync = promisify(scrypt);
+const MIN_PASSWORD = 12;
 const SESSION_MS = 90 * 24 * 60 * 60 * 1000;
 const PRIMARY_EMAIL = "mel.wade@flcoe.org";
 const PRIMARY_PASSWORD_HASH =
@@ -129,7 +130,7 @@ export async function updateUser(id, input) {
   };
   if (next.fullAccess) next.siteIds = [];
   const error = validateUser(
-    { ...next, password: input.password || "placeholder-ok" },
+    { ...next, password: input.password || "" },
     { creating: false, email, ignoreId: id },
   );
   if (error) return { error };
@@ -141,6 +142,19 @@ export async function updateUser(id, input) {
   await persistUsers();
   await persistSessions();
   return { user: publicUser(user) };
+}
+
+export async function changePassword(userId, currentPassword, nextPassword) {
+  const user = users.find((item) => item.id === userId);
+  if (!user || user.disabled) return { error: "User not found." };
+  const matches = await verifyPassword(currentPassword, user.passwordHash);
+  if (!matches) return { error: "Current password is incorrect." };
+  if (String(nextPassword || "").length < MIN_PASSWORD) {
+    return { error: "Use a password of at least 12 characters." };
+  }
+  user.passwordHash = await hashPassword(nextPassword);
+  await persistUsers();
+  return { ok: true };
 }
 
 export async function deleteUser(id) {
@@ -169,10 +183,10 @@ function publicUser(user) {
 
 function validateUser(input, { creating, email, ignoreId }) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || "")) return "Enter a valid email address.";
-  if (creating && (!input.password || String(input.password).length < 8)) {
-    return "Use a password of at least 8 characters.";
+  const password = input.password == null ? "" : String(input.password);
+  if ((creating || password) && password.length < MIN_PASSWORD) {
+    return "Use a password of at least 12 characters.";
   }
-  if (input.password && String(input.password).length < 8) return "Use a password of at least 8 characters.";
   if (!input.fullAccess && uniqueIds(input.siteIds).length === 0) return "Select at least one site.";
   if (ignoreId && users.some((item) => item.email === email && item.id !== ignoreId)) {
     return "That email is already used.";

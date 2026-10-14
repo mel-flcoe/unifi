@@ -9,6 +9,9 @@ if (logo) {
   logo.src = "/logo";
 }
 
+const icon = document.querySelector("link[rel='icon']");
+if (icon) icon.href = "/favicon";
+
 document.addEventListener("click", async (event) => {
   if (!event.target.closest("[data-logout]")) return;
   await fetch("/logout", { method: "POST" });

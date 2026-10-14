@@ -26,8 +26,8 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 24px;
-  align-items: flex-end;
-  padding: 28px 32px 20px;
+  align-items: center;
+  padding: 20px 32px;
   border-bottom: 1px solid var(--line);
   background: var(--band);
 }
@@ -62,6 +62,18 @@ body {
 
 .logo-preview[hidden] { display: none; }
 
+.favicon-preview {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  background: #141915;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.favicon-preview[hidden] { display: none; }
+
 .settings-form input[type="file"] {
   font: inherit;
   color: var(--text);
@@ -90,6 +102,48 @@ h1 {
   gap: 8px;
 }
 
+.menu {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.menu #nav { display: contents; }
+
+.menu a,
+.menu button,
+.menu .who {
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0 2px 14px;
+  margin: 0 0 0 14px;
+  border-left: 1px solid var(--line);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.menu a:first-child,
+.menu button:first-child,
+.menu .who:first-child {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
+}
+
+.menu a:hover,
+.menu button:hover {
+  color: var(--text);
+}
+
+.menu .who { color: var(--text); }
+
 .header-links {
   display: flex;
   flex-wrap: wrap;
@@ -98,15 +152,13 @@ h1 {
   align-items: center;
 }
 
-.settings-link, .header-links button, .who {
+.settings-link, .header-links button {
   color: var(--text);
   text-decoration: none;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 6px 12px;
 }
-
-.who { color: var(--muted); }
 
 .user-table {
   width: 100%;
@@ -361,6 +413,7 @@ code {
   .top, .summary, .toolbar, main { padding-left: 16px; padding-right: 16px; }
   .top { flex-direction: column; align-items: flex-start; }
   .header-side { align-items: flex-start; }
+  .menu { justify-content: flex-start; }
   .status { text-align: left; }
   .toolbar { flex-direction: column; align-items: stretch; }
   .warning { grid-template-columns: 1fr; }

@@ -36,8 +36,8 @@ function renderNav() {
   if (!nav || !latest?.access) return;
   const links = [];
   if (latest.access.admin) {
-    links.push(`<a class="settings-link" href="/users">Users</a>`);
-    links.push(`<a class="settings-link" href="/settings">Settings</a>`);
+    links.push(`<a href="/users">Users</a>`);
+    links.push(`<a href="/settings">Settings</a>`);
   }
   links.push(`<span class="who">${escapeHtml(latest.access.email)}</span>`);
   const markup = links.join("");
@@ -176,6 +176,10 @@ function escapeHtml(value) {
 function paintStatus() {
   if (!latest) return;
   const { error, updatedAt, demo, pollSeconds, checking } = latest;
+  if (!updatedAt && !error) {
+    status.textContent = "Waiting for the first check";
+    return;
+  }
   if (checking) {
     status.textContent = "Checking UniFi…";
     return;
@@ -196,13 +200,28 @@ function render() {
   renderSites();
 }
 
-const events = new EventSource("/api/events");
-events.onmessage = (event) => {
-  latest = JSON.parse(event.data);
-  if (latest.unauthorized) {
+function applyPayload(payload) {
+  if (payload?.unauthorized) {
     location.href = "/login";
     return;
   }
+  if (latest?.updatedAt && payload?.updatedAt && new Date(payload.updatedAt) < new Date(latest.updatedAt)) return;
+  latest = payload;
   render();
+}
+
+fetch("/api/warnings", { cache: "no-store" })
+  .then(async (saved) => {
+    if (saved.status === 401) {
+      location.href = "/login";
+      return;
+    }
+    applyPayload(await saved.json());
+  })
+  .catch(() => {});
+
+const events = new EventSource("/api/events");
+events.onmessage = (event) => {
+  applyPayload(JSON.parse(event.data));
 };
 setInterval(paintStatus, 1000);

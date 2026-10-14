@@ -90,7 +90,7 @@ function resetForm() {
   title.textContent = "Add user";
   saveButton.textContent = "Add user";
   cancelButton.hidden = true;
-  passwordHint.textContent = "At least 8 characters.";
+  passwordHint.textContent = "At least 12 characters.";
   form.password.required = true;
   siteField.hidden = false;
 }

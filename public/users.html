@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Users · Unifi Site Monitor</title>
+    <link rel="icon" href="/favicon" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -16,9 +17,10 @@
         </div>
       </div>
       <div class="header-side">
-        <nav class="header-links">
-          <a class="settings-link" href="/">Sites</a>
-          <a class="settings-link" href="/settings">Settings</a>
+        <nav class="menu" aria-label="Account">
+          <a href="/">Sites</a>
+          <a href="/settings">Settings</a>
+          <a href="/password">Password</a>
           <button type="button" data-logout>Log out</button>
         </nav>
       </div>
@@ -41,8 +43,8 @@
         <label for="email">Email</label>
         <input id="email" name="email" type="email" required />
         <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="new-password" />
-        <p class="quiet" id="password-hint">At least 8 characters.</p>
+        <input id="password" name="password" type="password" autocomplete="new-password" minlength="12" />
+        <p class="quiet" id="password-hint">At least 12 characters.</p>
         <label class="check"><input name="admin" type="checkbox" /> Admin access</label>
         <p class="quiet">Admins can open user management and settings.</p>
         <label class="check"><input name="fullAccess" type="checkbox" /> Full access to every site</label>
