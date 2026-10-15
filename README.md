@@ -9,6 +9,8 @@ A local dashboard for UniFi sites. It asks the [UniFi Site Manager API](https://
 
 Healthy devices stay off the page. Each warning includes the network, the device name, and the metrics the API provides: model, IP, MAC, firmware, uptime, and how many checks the problem has lasted.
 
+Be sure to set your website security permissions correctly.
+
 ## Run
 
 Install Node.js 22 or newer, then from this folder:
