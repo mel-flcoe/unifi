@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -63,5 +63,31 @@ test("seeds the primary user and can add, disable, and delete another user", asy
   assert.match(demoted.error, /admin/);
   const locked = await deleteUser(seeded[0].id);
   assert.match(locked.error, /admin/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("keeps a saved account list that replaced the original user", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "unifi-auth-"));
+  await writeFile(
+    path.join(dir, "users.json"),
+    JSON.stringify({
+      users: [
+        {
+          id: "demo",
+          email: "demo@flcoe.org",
+          passwordHash: "saved-hash",
+          fullAccess: true,
+          admin: true,
+          siteIds: [],
+          disabled: false,
+        },
+      ],
+    }),
+  );
+  await initAuth(dir);
+  assert.deepEqual(
+    listUsers().map((user) => user.email),
+    ["demo@flcoe.org"],
+  );
   await rm(dir, { recursive: true, force: true });
 });

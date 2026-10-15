@@ -221,6 +221,7 @@ async function ensurePrimaryUser() {
     }
     return;
   }
+  if (users.length > 0) return;
   users.push({
     id: randomBytes(12).toString("hex"),
     email: PRIMARY_EMAIL,
